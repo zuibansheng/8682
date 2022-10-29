@@ -1,0 +1,71 @@
+
+ #include <iostream>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <unistd.h>
+ #include <csignal>
+
+ using std::cout, std::endl;
+
+ void handler(int sig) {
+     cout << "recv a signal" << sig << endl;
+     exit(EXIT_SUCCESS);
+ }
+
+ int main() {
+
+     //listenfd = socket(PF_INET, SOCK_STREAM, 0),listenfd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)
+     //创建套接字
+     int sock;
+     if ((sock = socket(PF_INET, SOCK_STREAM, 0)) < 0)
+         perror("socket");
+
+     //ipv4的地址结构
+     struct sockaddr_in servaddr;
+     //初始化函数，初始化地址
+     memset(&servaddr, 0, sizeof(servaddr));
+     //地址族,地址的家族
+     servaddr.sin_family = AF_INET;
+     //端口号
+     servaddr.sin_port = htons(5188);//将5188转化为网络字节序，htons中的s表示两个字节
+
+     //地址
+     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);//本机的任意地址,并转化为32位
+     //servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");//指定一个IP地址
+     //inet_aton("127.0.0.1",&servaddr.sin_addr);
+
+     if ((connect(sock, (sockaddr *) &servaddr, sizeof(servaddr))) < 0)
+         perror("connect");
+
+     pid_t pid;
+     pid = fork();
+     if (pid == -1) {
+         perror("fork");
+     } else if (pid == 0) {
+         //子进程接收数据
+         char recvbuf[1024];
+         while (true) {
+             memset(recvbuf, 0, sizeof(recvbuf));
+             int ret = read(sock, recvbuf, sizeof(recvbuf));
+             if (ret == -1) {
+                 perror("read");
+                 break;
+             } else if (ret == 0) {
+                 cout << "对方关闭" << endl;
+                 kill(getppid(), SIGUSR1);
+                 break;
+             } else
+                 fputs(recvbuf, stdout);
+         }
+     } else {
+         signal(SIGUSR1, handler);
+         //父进程发送数据
+         char sendbuf[1024];
+         while (fgets(sendbuf, sizeof(sendbuf), stdin) != NULL) {
+             write(sock, sendbuf, strlen(sendbuf));
+             memset(sendbuf, 0, sizeof(sendbuf));
+         }
+     }
+     close(sock);
+     return 0;
+ }
