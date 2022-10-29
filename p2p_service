@@ -1,0 +1,125 @@
+
+ #include <iostream>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+ #include <csignal>
+
+ using std::cout, std::endl, std::cin;
+
+ void handler(int sig) {
+     cout << "recv a signal" << sig << endl;
+     exit(EXIT_SUCCESS);
+ }
+
+ int main() {
+     //listenfd = socket(PF_INET, SOCK_STREAM, 0),listenfd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)
+     //创建监听套接字
+     int listenfd;
+     if ((listenfd = socket(PF_INET, SOCK_STREAM, 0)) < 0)
+         perror("socket");
+
+     //ipv4的地址结构
+     struct sockaddr_in servaddr;
+     //初始化函数，初始化地址
+     memset(&servaddr, 0, sizeof(servaddr));
+     //地址族,地址的家族
+     servaddr.sin_family = AF_INET;
+     //端口号
+     servaddr.sin_port = htons(5188);//将5188转化为网络字节序，htons中的s表示两个字节
+
+
+     //地址
+     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);//本机的任意地址,并转化为32位
+     //servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");//指定一个IP地址
+     //inet_aton("127.0.0.1",&servaddr.sin_addr);
+
+     //开启地址重复利用
+     int on = 1;
+     if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
+         perror("setsockopt");
+     }
+
+     //绑定
+     /*
+      * 您的代码试图调用C++ std::bind()函数，而不是调用套接字bind()函数。这可能是由于代码中的using namespace std;语句造成的。
+      * 为了确保调用正确的函数，可以去掉using语句，或者将调用限定为使用全局命名空间中的函数：
+      * if (::bind(sockfd, (sockaddr *) &addr, sizeof(addr)) == -1) { */
+     if ((bind(listenfd, (struct sockaddr *) &servaddr, sizeof(servaddr))) == -1) {
+         perror("bind");
+     }
+
+     //监听
+     if (listen(listenfd, SOMAXCONN) < 0) {
+         perror("listen");
+     }
+
+     //创建连接的ipV4结构对象
+     sockaddr_in peeraddr;
+     socklen_t peerln = sizeof(peeraddr);
+
+     //新的套接字
+     // conn 已连接套接字
+     //accept(listenfd, (sockaddr *)&peeraddr,&peerln) 三方握手完成后，服务器调用accept()接受连接，
+     //accept ()客户端发送连接请求并成功连接
+     // 如果服务器调用accept()时还没有客户端的连接请求，就阻塞等待直到有客户端连接上来。
+     int conn = accept(listenfd, (sockaddr *) &peeraddr, &peerln);
+     if (conn < 0)
+         perror("accept");
+     cout << "地址" << inet_ntoa(peeraddr.sin_addr) << " 端口" << ntohs(peeraddr.sin_port) << endl;
+
+     /*
+      * 接收发送来的数据
+      * */
+
+     //创建进程
+     pid_t pid;
+     pid = fork();
+     if (pid == -1) {
+         perror("fork");
+     }
+     if (pid == 0) {
+         //利用信号实现父进程关闭从而子进程关闭
+         signal(SIGUSR1, handler);
+
+         //子进程发送数据
+         char sendbuf[1024];
+         //fgets(sendbuf, sizeof(sendbuf),stdin)获取输入
+
+         while (fgets(sendbuf, sizeof(sendbuf), stdin) != NULL) {
+             //write(conn, sendbuf, strlen(sendbuf));
+             send(conn, sendbuf, sizeof(sendbuf), 0);
+             bzero(sendbuf, 0);
+             //memset(sendbuf, 0, sizeof(sendbuf));
+         }
+         cout << "子进程关闭" << endl;
+         exit(EXIT_SUCCESS);
+     } else {
+         //父进程接收数据
+         char recvbuf[1024];
+         while (true) {
+             //先清空，再读取
+             memset(recvbuf, 0, sizeof(recvbuf));
+             int ret = recv(conn, recvbuf, sizeof(recvbuf), 0);
+             //int ret = read(conn, recvbuf, sizeof(recvbuf));
+             if (ret == -1) {
+                 perror("read");
+                 break;
+             } else if (ret == 0) {
+                 cout << "对方关闭" << endl;
+                 break;
+             } else
+                 fputs(recvbuf, stdout);
+         }
+         cout << "父进程关闭" << endl;
+         kill(pid, SIGUSR1);
+         exit(EXIT_SUCCESS);
+     }
+
+
+     close(listenfd);
+     close(conn);
+     return 0;
+
+ }
